@@ -405,7 +405,7 @@ if uploaded_file is None:
 # LOAD DATA
 # ─────────────────────────────────────────────
 try:
-    if uploaded_file.name.endswith(".csv"):
+    if uploaded_file.name.lower().endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
@@ -444,23 +444,28 @@ def detect_columns(df):
     date_names = ["date", "datetime", "time", "timestamp", "day", "dt"]
     rain_names = ["rainfall", "rain", "precipitation", "precip", "prcp", "p"]
     for c in df.columns:
-        if c.lower() in date_names:
-            date_col = c; break
+        if str(c).lower() in date_names:
+            date_col = c
+            break
     for c in df.columns:
-        if c.lower() in rain_names:
-            rain_col = c; break
+        if str(c).lower() in rain_names:
+            rain_col = c
+            break
     if date_col is None:
         for c in df.columns:
             try:
                 pd.to_datetime(df[c].head(20), errors="raise")
-                date_col = c; break
-            except:
+                date_col = c
+                break
+            except Exception:
                 continue
     if rain_col is None:
         for c in df.columns:
             if pd.api.types.is_numeric_dtype(df[c]) and c != date_col:
-                rain_col = c; break
+                rain_col = c
+                break
     return date_col, rain_col
+
 
 date_col, rain_col = detect_columns(df)
 
@@ -479,6 +484,30 @@ working.columns = ["date", "rainfall"]
 working["rainfall"] = working["rainfall"].fillna(0)
 
 # ═════════════════════════════════════════════
+# CORE VALUES (always computed, also used by PDF report)
+# ═════════════════════════════════════════════
+r = working["rainfall"]
+stats = {
+    "Total": float(r.sum()),
+    "Mean": float(r.mean()),
+    "Median": float(r.median()),
+    "Std Dev": float(r.std()) if len(r) > 1 else 0,
+    "Maximum": float(r.max()),
+    "Minimum": float(r.min()),
+    "Rainy Days": int((r > 0).sum()),
+    "Zero Days": int((r == 0).sum()),
+}
+
+deltas = working["date"].diff().dropna().dt.days
+if len(deltas):
+    mode_delta = deltas.mode().iloc[0] if len(deltas.mode()) else 1
+    resolution = {1: "Daily", 7: "Weekly", 30: "Monthly", 365: "Annual"}.get(
+        int(mode_delta), f"{int(mode_delta)}-day"
+    )
+else:
+    resolution = "N/A"
+
+# ═════════════════════════════════════════════
 # DATA QUALITY
 # ═════════════════════════════════════════════
 if show_stats:
@@ -489,12 +518,6 @@ if show_stats:
     expected_days = (date_max - date_min).days + 1
     missing_dates = expected_days - total
     duplicates = working["date"].duplicated().sum()
-    deltas = working["date"].diff().dropna().dt.days
-    if len(deltas):
-        mode_delta = deltas.mode().iloc[0] if len(deltas.mode()) else 1
-        resolution = {1: "Daily", 7: "Weekly", 30: "Monthly", 365: "Annual"}.get(int(mode_delta), f"{int(mode_delta)}-day")
-    else:
-        resolution = "N/A"
 
     q1, q2, q3, q4 = st.columns(4)
     with q1:
@@ -512,17 +535,7 @@ if show_stats:
 if show_stats:
     st.write("")
     st.markdown('<p class="section-title">📊 Basic Statistics</p>', unsafe_allow_html=True)
-    r = working["rainfall"]
-    stats = {
-        "Total": float(r.sum()),
-        "Mean": float(r.mean()),
-        "Median": float(r.median()),
-        "Std Dev": float(r.std()) if len(r) > 1 else 0,
-        "Maximum": float(r.max()),
-        "Minimum": float(r.min()),
-        "Rainy Days": int((r > 0).sum()),
-        "Zero Days": int((r == 0).sum()),
-    }
+
     s1, s2, s3, s4 = st.columns(4)
     with s1:
         st.markdown(f"""<div class="metric-card"><div class="metric-label">Total Rainfall</div><div class="metric-value">{stats['Total']:.1f} mm</div></div>""", unsafe_allow_html=True)
@@ -543,6 +556,7 @@ if show_stats:
     with s8:
         st.markdown(f"""<div class="metric-card"><div class="metric-label">Zero Days</div><div class="metric-value">{stats['Zero Days']:,}</div></div>""", unsafe_allow_html=True)
 
+
 # Chart styling
 def style_fig(fig, title):
     fig.update_layout(
@@ -555,6 +569,7 @@ def style_fig(fig, title):
         yaxis=dict(gridcolor=P["line"]),
     )
     return fig
+
 
 # ═════════════════════════════════════════════
 # TIME SERIES
@@ -572,14 +587,14 @@ if show_timeseries:
     fig_daily = style_fig(fig_daily, "Daily Precipitation")
     st.plotly_chart(fig_daily, use_container_width=True)
 
-    monthly = working.set_index("date")["rainfall"].resample("M").sum().reset_index()
+    monthly = working.set_index("date")["rainfall"].resample("ME").sum().reset_index()
     monthly.columns = ["month", "rainfall"]
     fig_monthly = go.Figure()
     fig_monthly.add_trace(go.Bar(x=monthly["month"], y=monthly["rainfall"], marker=dict(color=P["accent2"])))
     fig_monthly = style_fig(fig_monthly, "Monthly Precipitation Totals")
     st.plotly_chart(fig_monthly, use_container_width=True)
 
-    annual = working.set_index("date")["rainfall"].resample("Y").sum().reset_index()
+    annual = working.set_index("date")["rainfall"].resample("YE").sum().reset_index()
     annual["year"] = annual["date"].dt.year
     fig_annual = go.Figure()
     fig_annual.add_trace(go.Bar(x=annual["year"].astype(str), y=annual["rainfall"], marker=dict(color=P["accent"])))
@@ -588,9 +603,9 @@ if show_timeseries:
 
     working["month"] = working["date"].dt.month
     clim = working.groupby("month")["rainfall"].mean().reset_index()
-    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     fig_clim = go.Figure()
-    fig_clim.add_trace(go.Bar(x=[month_names[m-1] for m in clim["month"]], y=clim["rainfall"], marker=dict(color=P["accent2"])))
+    fig_clim.add_trace(go.Bar(x=[month_names[m - 1] for m in clim["month"]], y=clim["rainfall"], marker=dict(color=P["accent2"])))
     fig_clim = style_fig(fig_clim, "Monthly Climatology (Average)")
     st.plotly_chart(fig_clim, use_container_width=True)
 
@@ -618,7 +633,7 @@ if show_extremes:
     top10 = working.nlargest(10, "rainfall")[["date", "rainfall"]].reset_index(drop=True)
     top10.index += 1
     top10["date"] = top10["date"].dt.strftime("%Y-%m-%d")
-    st.dataframe(top10.rename(columns={"date":"Date","rainfall":"Rainfall (mm)"}), use_container_width=True)
+    st.dataframe(top10.rename(columns={"date": "Date", "rainfall": "Rainfall (mm)"}), use_container_width=True)
 
     max_row = working.loc[working["rainfall"].idxmax()]
     e1, e2 = st.columns(2)
@@ -641,12 +656,12 @@ if show_anomaly:
         with b1:
             base_start = st.selectbox("Baseline start year", years, index=0)
         with b2:
-            base_end = st.selectbox("Baseline end year", years, index=min(2, len(years)-1))
+            base_end = st.selectbox("Baseline end year", years, index=min(2, len(years) - 1))
 
         baseline = working[(working["year"] >= base_start) & (working["year"] <= base_end)]
         baseline_mean = baseline["rainfall"].mean()
 
-        monthly_anom = working.set_index("date")["rainfall"].resample("M").sum().reset_index()
+        monthly_anom = working.set_index("date")["rainfall"].resample("ME").sum().reset_index()
         monthly_anom.columns = ["month", "rainfall"]
         monthly_anom["anomaly"] = monthly_anom["rainfall"] - baseline_mean * 30
 
@@ -688,7 +703,7 @@ with d2:
             h_style = ParagraphStyle("H", parent=styles["Heading2"], fontName="Times-Bold", fontSize=14, textColor=colors.HexColor("#0284C7"))
 
             elements.append(Paragraph("Precipitation Analysis Report", title_style))
-            elements.append(Spacer(1, 0.3*inch))
+            elements.append(Spacer(1, 0.3 * inch))
             elements.append(Paragraph("1. Dataset Information", h_style))
             info_data = [
                 ["File", uploaded_file.name],
@@ -696,15 +711,15 @@ with d2:
                 ["Date Range", f"{working['date'].min().strftime('%Y-%m-%d')} to {working['date'].max().strftime('%Y-%m-%d')}"],
                 ["Resolution", resolution],
             ]
-            t = Table(info_data, colWidths=[1.8*inch, 4.5*inch])
-            t.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),"Times-Roman"),("GRID",(0,0),(-1,-1),0.5,colors.grey)]))
+            t = Table(info_data, colWidths=[1.8 * inch, 4.5 * inch])
+            t.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, -1), "Times-Roman"), ("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
             elements.append(t)
-            elements.append(Spacer(1, 0.3*inch))
+            elements.append(Spacer(1, 0.3 * inch))
 
             elements.append(Paragraph("2. Statistics", h_style))
             stat_data = [[k, f"{v:.2f}"] for k, v in stats.items()]
-            t2 = Table(stat_data, colWidths=[2.5*inch, 3.8*inch])
-            t2.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),"Times-Roman"),("GRID",(0,0),(-1,-1),0.5,colors.grey)]))
+            t2 = Table(stat_data, colWidths=[2.5 * inch, 3.8 * inch])
+            t2.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, -1), "Times-Roman"), ("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
             elements.append(t2)
 
             doc.build(elements)
@@ -726,4 +741,4 @@ st.markdown("""
 <div class="footer">
     Developed by Junaid Ali · Civil Engineering Research
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)S
