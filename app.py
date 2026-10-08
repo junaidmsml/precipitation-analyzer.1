@@ -741,4 +741,4 @@ st.markdown("""
 <div class="footer">
     Developed by Junaid Ali · Civil Engineering Research
 </div>
-""", unsafe_allow_html=True)S
+""", unsafe_allow_html=True)
